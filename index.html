@@ -282,6 +282,7 @@ input.sub-hd-name{cursor:text;background:var(--bg4);border:1px solid var(--accen
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -362,8 +363,8 @@ input.sub-hd-name{cursor:text;background:var(--bg4);border:1px solid var(--accen
 </div>
 
 <script>
-// ── State ──────────────────────────────────────────
 let S={folders:[],topics:[]};
+// ── State ──────────────────────────────────────────
 let view='home', curTopicId=null, curDetail=null, curDeadlineFilter=null;
 let selIds=new Set(), modalCb=null, confirmCb=null, ctxId=null, ctxOpen=false;
 let dragState=null; // for subtask drag-reorder
@@ -429,62 +430,26 @@ function closeConfirm(result){
   confirmCb=null;
 }
 
-// ── Demo data ──────────────────────────────────────
-function initDemo(){
-  let f1={id:uid(),name:'Работа',open:true},f2={id:uid(),name:'Личное',open:true};
-  S.folders=[f1,f2];
-  
-  const today=new Date();
-  const formatDate=d=>d.toISOString().split('T')[0];
-  
-  S.topics=[
-    {id:uid(),name:'Проект Alpha',folderId:f1.id,subtopics:[
-      {id:uid(),name:'Разработка',tasks:[
-        {id:uid(),name:'Настроить CI/CD',desc:'Установить GitHub Actions для авто-деплоя',deadline:formatDate(new Date(today.getTime()+2*86400000)),done:false,
-          subtasks:[
-            {id:uid(),name:'Создать workflow файл',done:true},
-            {id:uid(),name:'Настроить секреты репозитория',done:false},
-            {id:uid(),name:'Проверить запуск на PR',done:false},
-          ]},
-        {id:uid(),name:'Написать тесты',desc:'',deadline:formatDate(new Date(today.getTime()+10*86400000)),done:false,subtasks:[]},
-      ]},
-      {id:uid(),name:'Дизайн',tasks:[
-        {id:uid(),name:'Макет главной',desc:'Figma, тёмная тема',deadline:'2026-04-26',done:true,
-          subtasks:[
-            {id:uid(),name:'Хедер и навигация',done:true},
-            {id:uid(),name:'Блок Hero',done:true},
-            {id:uid(),name:'Секция Фичи',done:true},
-          ]},
-      ]},
-      {id:uid(),name:'Документация',tasks:[]},
-    ]},
-    {id:uid(),name:'Ежедневные задачи',folderId:f1.id,subtopics:[
-      {id:uid(),name:'Утро',tasks:[{id:uid(),name:'Стендап в 10:00',desc:'',deadline:formatDate(today),done:false,subtasks:[]}]},
-      {id:uid(),name:'Вечер',tasks:[]},
-    ]},
-    {id:uid(),name:'Спорт',folderId:f2.id,subtopics:[
-      {id:uid(),name:'Зал',tasks:[{id:uid(),name:'Тренировка ноги',desc:'Приседания 4x10',deadline:formatDate(new Date(today.getTime()+5*86400000)),done:false,
-        subtasks:[
-          {id:uid(),name:'Разминка 10 мин',done:false},
-          {id:uid(),name:'Приседания 4×10',done:false},
-          {id:uid(),name:'Жим ногами 3×12',done:false},
-          {id:uid(),name:'Заминка и растяжка',done:false},
-        ]}]},
-    ]},
-    {id:uid(),name:'Разное',folderId:null,subtopics:[
-      {id:uid(),name:'Общее',tasks:[
-        {id:uid(),name:'Купить продукты',desc:'',deadline:formatDate(today),done:false,
-          subtasks:[
-            {id:uid(),name:'Молоко',done:false},
-            {id:uid(),name:'Хлеб',done:false},
-            {id:uid(),name:'Яйца',done:false},
-          ]},
-        {id:uid(),name:'Оплатить счета',desc:'',deadline:formatDate(new Date(today.getTime()+20*86400000)),done:false,subtasks:[]},
-      ]},
-    ]},
-  ];
-  render();
+// Функция сохранения данных
+async function saveData() {
+  const { error } = await supabase
+    .from('app_state')
+    .update({ data: S })
+    .eq('id', 1);
+
+  if (error) console.error("Ошибка сохранения:", error);
 }
+
+// ХАК: Переопределяем твою функцию render, 
+// чтобы она автоматически сохраняла данные при любом изменении
+const originalRender = render;
+render = function() {
+  originalRender(); // Отрисовываем UI
+  saveData();       // Фоном отправляем свежий объект S в базу
+};
+
+// Запускаем приложение
+loadData();
 
 // ── Main render ────────────────────────────────────
 function render(){
@@ -1233,7 +1198,28 @@ document.addEventListener('keydown',e=>{
   if(view==='topic'||view==='deadline'){goHome();return;}
 });
 
-initDemo();
+// ── Supabase Integration ───────────────────────────
+const supabaseUrl = 'https://yonqtabrchxilvleoupy.supabase.co/rest/v1/';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlvbnF0YWJyY2h4aWx2bGVvdXB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjk0NjcsImV4cCI6MjA5MjcwNTQ2N30.JhmBCV1ASd5ABDisMDQV8ZqCd0cFKvORnyxWv_Holo4';
+const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+// Функция загрузки данных при старте
+async function loadData() {
+  const { data, error } = await supabase
+    .from('app_state')
+    .select('data')
+    .eq('id', 1)
+    .single();
+
+  if (data && data.data) {
+    S = data.data; // Заменяем локальный стейт на данные из БД
+  } else if (error) {
+    console.error("Ошибка загрузки:", error);
+  }
+  
+  render(); // Отрисовываем интерфейс
+}
+
 </script>
 </body>
 </html>
