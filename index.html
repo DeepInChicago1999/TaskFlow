@@ -282,7 +282,6 @@ input.sub-hd-name{cursor:text;background:var(--bg4);border:1px solid var(--accen
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -363,8 +362,112 @@ input.sub-hd-name{cursor:text;background:var(--bg4);border:1px solid var(--accen
 </div>
 
 <script>
-let S={folders:[],topics:[]};
+// ── Supabase config ────────────────────────────────
+const SB_URL = 'https://yonqtabrchxilvleoupy.supabase.co/rest/v1';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlvbnF0YWJyY2h4aWx2bGVvdXB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjk0NjcsImV4cCI6MjA5MjcwNTQ2N30.JhmBCV1ASd5ABDisMDQV8ZqCd0cFKvORnyxWv_Holo4';
+const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
+const SB_ROW_KEY = 'default';
+let sbSaveTimer = null;
+
+async function sbEnsureTable() {
+  // Try to read; if table doesn't exist, the first upsert will show an error we handle gracefully
+}
+
+async function sbLoad() {
+  showToast('⏳ Загрузка данных...', 3000);
+  try {
+    const r = await fetch(`${SB_URL}/taskflow_state?key=eq.${SB_ROW_KEY}&select=data`, {
+      headers: { ...SB_HEADERS, 'Accept': 'application/json' }
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      // Table might not exist yet
+      if (r.status === 404 || (err.code && err.code === '42P01')) {
+        await sbCreateTable();
+        render(); return;
+      }
+      throw new Error(err.message || r.statusText);
+    }
+    const rows = await r.json();
+    if (rows && rows.length > 0 && rows[0].data) {
+      const loaded = rows[0].data;
+      S.folders = loaded.folders || [];
+      S.topics  = loaded.topics  || [];
+      showToast('✓ Данные загружены');
+    } else {
+      showToast('✓ Новое хранилище готово');
+    }
+    _sbInitialized = true;
+    render();
+  } catch(e) {
+    console.error('sbLoad error:', e);
+    showToast('⚠ Ошибка загрузки: ' + e.message, 4000);
+    _sbInitialized = true;
+    render();
+  }
+}
+
+async function sbCreateTable() {
+  // We can't create tables via REST API directly, so we'll upsert to trigger a helpful error
+  // and show the user setup instructions
+  showToast('⚠ Таблица не найдена. Создайте её в Supabase (см. консоль).', 6000);
+  console.warn(
+    'TaskFlow: создайте таблицу в Supabase SQL Editor:\n\n' +
+    'CREATE TABLE taskflow_state (\n' +
+    '  key TEXT PRIMARY KEY,\n' +
+    '  data JSONB,\n' +
+    '  updated_at TIMESTAMPTZ DEFAULT now()\n' +
+    ');\n' +
+    'ALTER TABLE taskflow_state ENABLE ROW LEVEL SECURITY;\n' +
+    'CREATE POLICY "Allow all" ON taskflow_state FOR ALL USING (true) WITH CHECK (true);'
+  );
+}
+
+async function sbSave() {
+  try {
+    const payload = { key: SB_ROW_KEY, data: { folders: S.folders, topics: S.topics }, updated_at: new Date().toISOString() };
+    const r = await fetch(`${SB_URL}/taskflow_state`, {
+      method: 'POST',
+      headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      if (r.status === 404 || (err.code && err.code === '42P01')) {
+        await sbCreateTable(); return;
+      }
+      throw new Error(err.message || r.statusText);
+    }
+    showToast('✓ Сохранено');
+  } catch(e) {
+    console.error('sbSave error:', e);
+    showToast('⚠ Ошибка сохранения: ' + e.message, 4000);
+  }
+}
+
+// Debounced auto-save after any state change
+function scheduleSave() {
+  clearTimeout(sbSaveTimer);
+  sbSaveTimer = setTimeout(sbSave, 600);
+}
+
+// ── Toast notification ─────────────────────────────
+function showToast(msg, duration=2000) {
+  let t = document.getElementById('sb-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'sb-toast';
+    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#27272c;border:1px solid #45454e;color:#e8e8ea;padding:8px 18px;border-radius:8px;font-size:13px;z-index:9999;pointer-events:none;transition:opacity .3s;font-family:inherit';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, duration);
+}
+
 // ── State ──────────────────────────────────────────
+let S={folders:[],topics:[]};
 let view='home', curTopicId=null, curDetail=null, curDeadlineFilter=null;
 let selIds=new Set(), modalCb=null, confirmCb=null, ctxId=null, ctxOpen=false;
 let dragState=null; // for subtask drag-reorder
@@ -430,29 +533,15 @@ function closeConfirm(result){
   confirmCb=null;
 }
 
-// Функция сохранения данных
-async function saveData() {
-  const { error } = await supabase
-    .from('app_state')
-    .update({ data: S })
-    .eq('id', 1);
-
-  if (error) console.error("Ошибка сохранения:", error);
+// ── Init ───────────────────────────────────────────
+function initDemo(){
+  sbLoad(); // loads state from Supabase, then calls render()
 }
 
-// ХАК: Переопределяем твою функцию render, 
-// чтобы она автоматически сохраняла данные при любом изменении
-const originalRender = render;
-render = function() {
-  originalRender(); // Отрисовываем UI
-  saveData();       // Фоном отправляем свежий объект S в базу
-};
-
-// Запускаем приложение
-loadData();
-
 // ── Main render ────────────────────────────────────
+let _sbInitialized = false;
 function render(){
+  if(_sbInitialized) scheduleSave();
   renderSidebar();
   renderBreadcrumb();
   renderActionBar();
@@ -1198,28 +1287,7 @@ document.addEventListener('keydown',e=>{
   if(view==='topic'||view==='deadline'){goHome();return;}
 });
 
-// ── Supabase Integration ───────────────────────────
-const supabaseUrl = 'https://yonqtabrchxilvleoupy.supabase.co/rest/v1/';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlvbnF0YWJyY2h4aWx2bGVvdXB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjk0NjcsImV4cCI6MjA5MjcwNTQ2N30.JhmBCV1ASd5ABDisMDQV8ZqCd0cFKvORnyxWv_Holo4';
-const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
-
-// Функция загрузки данных при старте
-async function loadData() {
-  const { data, error } = await supabase
-    .from('app_state')
-    .select('data')
-    .eq('id', 1)
-    .single();
-
-  if (data && data.data) {
-    S = data.data; // Заменяем локальный стейт на данные из БД
-  } else if (error) {
-    console.error("Ошибка загрузки:", error);
-  }
-  
-  render(); // Отрисовываем интерфейс
-}
-
+initDemo();
 </script>
 </body>
 </html>
