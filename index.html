@@ -1008,6 +1008,7 @@ function confirmAddSubtask(taskId,subId){
   let task=findTaskObj(taskId,subId);if(!task)return;
   if(!task.subtasks)task.subtasks=[];
   task.subtasks.push({id:uid(),name:v,done:false});
+  scheduleSave(); 
   renderDetailPanel(taskId,subId);
   if(view==='topic')renderTopic();
   if(view==='deadline')renderDeadlineView();
@@ -1019,6 +1020,7 @@ function toggleSubtask(taskId,subId,stId){
   let task=findTaskObj(taskId,subId);if(!task||!task.subtasks)return;
   let st=task.subtasks.find(x=>x.id===stId);
   if(st)st.done=!st.done;
+  scheduleSave();
   renderDetailPanel(taskId,subId);
   if(view==='topic')renderTopic();
   if(view==='deadline')renderDeadlineView();
@@ -1047,6 +1049,7 @@ function editSubtaskInline(taskId,subId,stId){
     if(committed)return; committed=true;
     let v=inp.value.trim();
     if(v)st.name=v;
+    scheduleSave();
     renderDetailPanel(taskId,subId);
     if(view==='topic')renderTopic();
     if(view==='deadline')renderDeadlineView();
@@ -1071,6 +1074,7 @@ function deleteSubtask(taskId,subId,stId){
   openConfirm('Удалить подзадачу',`Удалить «${st.name}»?`,'Удалить',(ok)=>{
     if(!ok)return;
     task.subtasks=task.subtasks.filter(x=>x.id!==stId);
+    scheduleSave();
     renderDetailPanel(taskId,subId);
     if(view==='topic')renderTopic();
     if(view==='deadline')renderDeadlineView();
@@ -1104,6 +1108,7 @@ function stDrop(e,taskId,subId,targetStId){
   if(fromIdx<0||toIdx<0)return;
   let [moved]=task.subtasks.splice(fromIdx,1);
   task.subtasks.splice(toIdx,0,moved);
+  scheduleSave();
   stDragEnd(e);
   renderDetailPanel(taskId,subId);
 }
