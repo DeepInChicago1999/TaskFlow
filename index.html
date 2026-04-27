@@ -368,20 +368,17 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
 const SB_ROW_KEY = 'default';
 let sbSaveTimer = null;
-
-async function sbEnsureTable() {
-  // Try to read; if table doesn't exist, the first upsert will show an error we handle gracefully
-}
+let sbLastKnownUpdatedAt = null; // timestamp of the state we last loaded/saved
+const SB_POLL_INTERVAL = 15000;  // проверять обновления каждые 15 сек
 
 async function sbLoad() {
   showToast('⏳ Загрузка данных...', 3000);
   try {
-    const r = await fetch(`${SB_URL}/taskflow_state?key=eq.${SB_ROW_KEY}&select=data`, {
+    const r = await fetch(`${SB_URL}/taskflow_state?key=eq.${SB_ROW_KEY}&select=data,updated_at`, {
       headers: { ...SB_HEADERS, 'Accept': 'application/json' }
     });
     if (!r.ok) {
       const err = await r.json().catch(()=>({}));
-      // Table might not exist yet
       if (r.status === 404 || (err.code && err.code === '42P01')) {
         await sbCreateTable();
         render(); return;
@@ -393,23 +390,72 @@ async function sbLoad() {
       const loaded = rows[0].data;
       S.folders = loaded.folders || [];
       S.topics  = loaded.topics  || [];
+      sbLastKnownUpdatedAt = rows[0].updated_at || null;
       showToast('✓ Данные загружены');
     } else {
       showToast('✓ Новое хранилище готово');
     }
     _sbInitialized = true;
     render();
+    sbStartPolling();
   } catch(e) {
     console.error('sbLoad error:', e);
     showToast('⚠ Ошибка загрузки: ' + e.message, 4000);
     _sbInitialized = true;
     render();
+    sbStartPolling();
+  }
+}
+
+// Периодически проверяем, не обновил ли другой девайс данные в БД
+let sbPollTimer = null;
+function sbStartPolling() {
+  if (sbPollTimer) return;
+  sbPollTimer = setInterval(sbPollForUpdates, SB_POLL_INTERVAL);
+}
+
+async function sbPollForUpdates() {
+  // Если есть несохранённые изменения — не перезаписываем, дадим сохраниться сначала
+  if (sbSaveTimer) return;
+  try {
+    const r = await fetch(`${SB_URL}/taskflow_state?key=eq.${SB_ROW_KEY}&select=updated_at`, {
+      headers: { ...SB_HEADERS, 'Accept': 'application/json' }
+    });
+    if (!r.ok) return;
+    const rows = await r.json();
+    if (!rows || !rows.length) return;
+    const remoteTs = rows[0].updated_at;
+    // Если в БД данные новее нашего последнего известного состояния — тихо подгружаем
+    if (remoteTs && remoteTs !== sbLastKnownUpdatedAt) {
+      console.log('TaskFlow: обнаружено обновление на другом устройстве, синхронизируем...');
+      await sbSyncFromRemote();
+    }
+  } catch(e) {
+    // тихо игнорируем ошибки поллинга
+  }
+}
+
+// Загружает актуальные данные из БД, не трогая несохранённые изменения
+async function sbSyncFromRemote() {
+  try {
+    const r = await fetch(`${SB_URL}/taskflow_state?key=eq.${SB_ROW_KEY}&select=data,updated_at`, {
+      headers: { ...SB_HEADERS, 'Accept': 'application/json' }
+    });
+    if (!r.ok) return;
+    const rows = await r.json();
+    if (!rows || !rows.length || !rows[0].data) return;
+    const loaded = rows[0].data;
+    S.folders = loaded.folders || [];
+    S.topics  = loaded.topics  || [];
+    sbLastKnownUpdatedAt = rows[0].updated_at;
+    render();
+    showToast('🔄 Данные синхронизированы с другого устройства');
+  } catch(e) {
+    console.error('sbSyncFromRemote error:', e);
   }
 }
 
 async function sbCreateTable() {
-  // We can't create tables via REST API directly, so we'll upsert to trigger a helpful error
-  // and show the user setup instructions
   showToast('⚠ Таблица не найдена. Создайте её в Supabase (см. консоль).', 6000);
   console.warn(
     'TaskFlow: создайте таблицу в Supabase SQL Editor:\n\n' +
@@ -425,7 +471,8 @@ async function sbCreateTable() {
 
 async function sbSave() {
   try {
-    const payload = { key: SB_ROW_KEY, data: { folders: S.folders, topics: S.topics }, updated_at: new Date().toISOString() };
+    const now = new Date().toISOString();
+    const payload = { key: SB_ROW_KEY, data: { folders: S.folders, topics: S.topics }, updated_at: now };
     const r = await fetch(`${SB_URL}/taskflow_state`, {
       method: 'POST',
       headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
@@ -438,6 +485,7 @@ async function sbSave() {
       }
       throw new Error(err.message || r.statusText);
     }
+    sbLastKnownUpdatedAt = now; // запоминаем метку времени нашего сохранения
     showToast('✓ Сохранено');
   } catch(e) {
     console.error('sbSave error:', e);
@@ -448,8 +496,18 @@ async function sbSave() {
 // Debounced auto-save after any state change
 function scheduleSave() {
   clearTimeout(sbSaveTimer);
-  sbSaveTimer = setTimeout(sbSave, 600);
+  sbSaveTimer = setTimeout(async () => {
+    sbSaveTimer = null;
+    await sbSave();
+  }, 600);
 }
+
+// При возвращении на вкладку — сразу проверяем актуальность данных
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && _sbInitialized) {
+    sbPollForUpdates();
+  }
+});
 
 // ── Toast notification ─────────────────────────────
 function showToast(msg, duration=2000) {
