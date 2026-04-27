@@ -369,7 +369,7 @@ const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Auth
 const SB_ROW_KEY = 'default';
 let sbSaveTimer = null;
 let sbLastKnownUpdatedAt = null; // timestamp of the state we last loaded/saved
-const SB_POLL_INTERVAL = 15000;  // проверять обновления каждые 15 сек
+const SB_POLL_INTERVAL = 25000;  // проверять обновления каждые 25 сек
 
 async function sbLoad() {
   showToast('⏳ Загрузка данных...', 3000);
