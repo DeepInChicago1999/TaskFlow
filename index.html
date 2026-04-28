@@ -369,7 +369,7 @@ const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Auth
 const SB_ROW_KEY = 'default';
 let sbSaveTimer = null;
 let sbLastKnownUpdatedAt = null; // timestamp of the state we last loaded/saved
-const SB_POLL_INTERVAL = 25000;  // проверять обновления каждые 25 сек
+const SB_POLL_INTERVAL = 15000;  // проверять обновления каждые 15 сек
 
 async function sbLoad() {
   showToast('⏳ Загрузка данных...', 3000);
@@ -395,13 +395,15 @@ async function sbLoad() {
     } else {
       showToast('✓ Новое хранилище готово');
     }
-    _sbInitialized = true;
+     _sbInitialized = true;
+    _renderFromLoad = true;
     render();
     sbStartPolling();
   } catch(e) {
     console.error('sbLoad error:', e);
     showToast('⚠ Ошибка загрузки: ' + e.message, 4000);
     _sbInitialized = true;
+    _renderFromLoad = true;
     render();
     sbStartPolling();
   }
@@ -445,6 +447,7 @@ async function sbSyncFromRemote() {
     S.folders = loaded.folders || [];
     S.topics  = loaded.topics  || [];
     sbLastKnownUpdatedAt = rows[0].updated_at;
+      _renderFromLoad = true;
     render();
     showToast('🔄 Данные синхронизированы с другого устройства');
   } catch(e) {
@@ -595,8 +598,10 @@ function initDemo(){
 
 // ── Main render ────────────────────────────────────
 let _sbInitialized = false;
+let _renderFromLoad = false;
 function render(){
-  if(_sbInitialized) scheduleSave();
+  if(_sbInitialized && !_renderFromLoad) scheduleSave();
+  _renderFromLoad = false;
   renderSidebar();
   renderBreadcrumb();
   renderActionBar();
