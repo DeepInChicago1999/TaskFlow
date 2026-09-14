@@ -110,6 +110,7 @@ input.sub-hd-name{cursor:text;background:var(--bg4);border:1px solid var(--accen
 .sub-hd-acts{display:flex;gap:1px;opacity:0;transition:opacity .12s;flex-shrink:0}
 .sub-hd:hover .sub-hd-acts{opacity:1}
 .tasks-list{flex:1;overflow-y:auto;padding:8px}
+.tasks-list.task-drop-target{background:rgba(90,127,255,.06)}
 .task-card{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:background .12s,border-color .12s;margin-bottom:5px}
 .task-card:hover{background:var(--bg4);border-color:var(--border2)}
 
@@ -765,7 +766,10 @@ function renderTopic(){
         <div class="sub-hd-name" id="sn-${s.id}" onclick="editSubName('${s.id}')">${esc(s.name)}</div>
         <div class="sub-hd-acts"><button class="ico-btn del" onclick="deleteSub('${s.id}')">✕</button></div>
       </div>
-      <div class="tasks-list" id="tl-${s.id}">`;
+      <div class="tasks-list" id="tl-${s.id}"
+        ondragover="taskDropZoneOver(event)"
+        ondragleave="taskDropZoneLeave(event)"
+        ondrop="taskDropAtEnd(event,'${s.id}')">`;
     s.tasks.forEach(task=>{
       let ov=task.deadline&&!task.done&&new Date(task.deadline)<new Date();
       let st=task.subtasks||[], stDone=st.filter(x=>x.done).length, stTotal=st.length;
@@ -1153,8 +1157,8 @@ function taskDragStart(e,taskId,subId){
 }
 function taskDragOver(e,taskId,subId){
   if(!taskDragState||taskDragState.taskId===taskId)return;
-  e.preventDefault();e.dataTransfer.dropEffect='move';
-  document.querySelectorAll('.task-card').forEach(c=>c.classList.remove('task-drop-target'));
+  e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';
+  document.querySelectorAll('.task-card,.tasks-list,.add-task-row').forEach(c=>c.classList.remove('task-drop-target'));
   let card=document.getElementById('tc-'+taskId);
   if(card)card.classList.add('task-drop-target');
 }
@@ -1162,7 +1166,7 @@ function taskDragLeave(e){
   let t=e.currentTarget;if(t)t.classList.remove('task-drop-target');
 }
 function taskDrop(e,targetTaskId,targetSubId){
-  e.preventDefault();
+  e.preventDefault();e.stopPropagation();
   if(!taskDragState||taskDragState.taskId===targetTaskId)return;
   let topic=S.topics.find(t=>t.id===curTopicId);if(!topic)return;
   let fromSub=topic.subtopics.find(s=>s.id===taskDragState.subId);
